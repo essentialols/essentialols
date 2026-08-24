@@ -1,0 +1,29 @@
+name: Build Kept Android Community Port
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build APK with Android SDK command-line tools
+        run: |
+          chmod +x kept-android-port/build.sh
+          ./kept-android-port/build.sh
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kept-android-community-apk
+          path: |
+            kept-android-port/build/kept-android-community-v0.1.apk
+            kept-android-port/build/SHA256SUMS.txt
+          if-no-files-found: error
