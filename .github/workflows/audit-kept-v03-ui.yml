@@ -1,0 +1,147 @@
+name: Audit Kept v0.3 UI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  responsive:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out v0.3
+        uses: actions/checkout@v4
+
+      - name: Check out upstream Kept
+        uses: actions/checkout@v4
+        with:
+          repository: ericerkz/kept
+          ref: f7ce7a49b0c567695f09051f8f8424fa58a7d480
+          path: upstream
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build and start upstream Kept
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd upstream
+          npm ci
+          npm run build
+          PORT=6767 node server/server.js > /tmp/kept-server.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:6767/api/setup/status >/dev/null && break
+            sleep 1
+          done
+          curl -fsS -X POST http://127.0.0.1:6767/api/setup/admin \
+            -H 'Content-Type: application/json' \
+            --data '{"username":"audit","displayName":"Mobile Audit","password":"AuditPass123!"}' >/dev/null
+          curl -fsS -X POST http://127.0.0.1:6767/api/auth/login \
+            -H 'Content-Type: application/json' \
+            --data '{"username":"audit","password":"AuditPass123!"}' >/tmp/login.json
+          TOKEN=$(jq -r .token /tmp/login.json)
+          echo "TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          curl -fsS -X POST http://127.0.0.1:6767/api/users/me/mark-demo-notes-created \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data '{}' >/dev/null
+          create_note() {
+            curl -fsS -X POST http://127.0.0.1:6767/api/notes \
+              -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+              --data "$1" >/dev/null
+          }
+          create_note '{"noteTitle":"Groceries for tonight","noteBody":"Oat milk, tomatoes, fresh basil, pasta, lemons, and something nice for dessert.","bgColor":"#fff475","pinned":true,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"Trip ideas ✈️","noteBody":"Kyoto in autumn<br>Monterey weekend<br>Train to Portland","bgColor":"#cbf0f8","pinned":true,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"Things to remember","noteBody":"","bgColor":"#ccff90","pinned":false,"isCbox":true,"checkBoxes":[{"id":1,"done":false,"data":"Send the document"},{"id":2,"done":false,"data":"Call the dentist"},{"id":3,"done":true,"data":"Book haircut"}],"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"A deliberately long note title to test wrapping on narrow phones","noteBody":"This card has enough text to expose cramped padding, bad line lengths, clipping, or awkward masonry behavior when the viewport gets small.","bgColor":"#f28b82","pinned":false,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"Quick thought","noteBody":"The fastest capture flow should stay visually quiet.","bgColor":"#d7aefb","pinned":false,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"Plain white card","noteBody":"Useful for checking borders, shadow contrast, and spacing without color doing the work.","bgColor":"#ffffff","pinned":false,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+
+      - name: Install Playwright
+        shell: bash
+        run: |
+          mkdir -p /tmp/ui-audit && cd /tmp/ui-audit
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0 >/dev/null
+          npx playwright install chromium >/dev/null
+
+      - name: Render packaged v0.3 overrides
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ui-audit/v03
+          USER_JSON=$(jq -c .user /tmp/login.json)
+          TOKEN_JSON=$(jq -r .token /tmp/login.json)
+          export AUDIT_SESSION=$(jq -nc --argjson u "$USER_JSON" --arg t "$TOKEN_JSON" '{token:$t,id:$u.id,username:$u.username,displayName:$u.displayName,role:$u.role,theme:"light",avatarDataUrl:"",avatarPreset:($u.avatarPreset // "cat"),totpEnabled:false,hasBackupCodes:false,demoNotesCreatedAt:"2026-08-25T00:00:00.000Z"}')
+          cat > /tmp/ui-audit/audit.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs';
+          import path from 'node:path';
+
+          const root = process.env.GITHUB_WORKSPACE;
+          const css = path.join(root, 'kept-android-port/src/main/assets/kept-android.css');
+          const js = path.join(root, 'kept-android-port/src/main/assets/kept-android.js');
+          const sizes = [
+            ['tiny-320x568',320,568], ['phone-360x800',360,800], ['pixel-393x852',393,852],
+            ['large-phone-412x915',412,915], ['compact-tablet-600x960',600,960],
+            ['tablet-768x1024',768,1024], ['phone-landscape-800x360',800,360],
+          ];
+          const browser = await chromium.launch({headless:true});
+          const session = process.env.AUDIT_SESSION;
+          const out = {};
+          const failures = [];
+          for (const [name,width,height] of sizes) {
+            const context = await browser.newContext({viewport:{width,height}, deviceScaleFactor:1, isMobile:true, hasTouch:true});
+            const page = await context.newPage();
+            await page.addInitScript((s) => localStorage.setItem('gk_session', s), session);
+            await page.goto('http://127.0.0.1:6767/', {waitUntil:'networkidle'});
+            await page.waitForTimeout(900);
+            await page.addStyleTag({path:css});
+            await page.addScriptTag({path:js});
+            await page.waitForTimeout(1400);
+            await page.screenshot({path:`ui-audit/v03/${name}.png`, fullPage:false});
+            const m = await page.evaluate(() => {
+              const visible = (el) => { const r=el.getBoundingClientRect(), s=getComputedStyle(el); return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'; };
+              const cards=[...document.querySelectorAll('[data-note-id]')].filter(visible).map(el=>{const r=el.getBoundingClientRect();return {x:+r.x.toFixed(1),y:+r.y.toFixed(1),w:+r.width.toFixed(1),h:+r.height.toFixed(1)};});
+              const rect = (sel) => { const el=document.querySelector(sel); if(!el||!visible(el))return null; const r=el.getBoundingClientRect();return {w:+r.width.toFixed(1),h:+r.height.toFixed(1)}; };
+              const sidebar=document.querySelector('app-sidenav .main-sidebar');
+              return {
+                width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,
+                horizontalOverflow:document.documentElement.scrollWidth>innerWidth+1,
+                compact:document.documentElement.classList.contains('kept-community-compact'),
+                tiny:document.documentElement.classList.contains('kept-community-tiny'),
+                cardCount:cards.length,cards,
+                sidebarClosed:sidebar?sidebar.classList.contains('close'):null,
+                menu:rect('app-navbar .pic-container'), filter:rect('app-navbar .filters-btn'),
+                viewToggle:rect('app-navbar .btns-container .view'), profile:rect('app-navbar .user-pic-container'),
+                appMenuPresent:!!document.querySelector('.kept-community-app-menu'),
+                installUiVisible:!![...document.querySelectorAll('.mobile-install-fab,.install-pwa,app-sidenav .install-section')].find(visible)
+              };
+            });
+            out[name]=m;
+            if (m.horizontalOverflow) failures.push(`${name}: horizontal overflow`);
+            const shouldCompact = width < 840 || height < 480;
+            if (m.compact !== shouldCompact) failures.push(`${name}: compact=${m.compact}, expected ${shouldCompact}`);
+            if (width < 340 && !m.tiny) failures.push(`${name}: tiny class missing`);
+            if (width < 340 && m.cards.some(c => c.w < 250)) failures.push(`${name}: tiny cards remain too narrow`);
+            if ((width===600 || width===768 || height<480) && m.cards.length && Math.max(...m.cards.map(c=>c.w)) < 200) failures.push(`${name}: cards still cramped`);
+            for (const [key,r] of Object.entries({menu:m.menu,filter:m.filter,profile:m.profile})) if (r && (r.w < 44 || r.h < 44)) failures.push(`${name}: ${key} target ${r.w}x${r.h}`);
+            if (!m.appMenuPresent) failures.push(`${name}: Android app menu missing`);
+            if (m.installUiVisible) failures.push(`${name}: PWA install UI still visible`);
+            await context.close();
+          }
+          fs.writeFileSync('ui-audit/v03/metrics.json', JSON.stringify(out,null,2));
+          fs.writeFileSync('ui-audit/v03/failures.json', JSON.stringify(failures,null,2));
+          console.log(JSON.stringify(out,null,2));
+          if (failures.length) { console.error('REGRESSIONS:', failures); process.exit(1); }
+          await browser.close();
+          EOF
+          node /tmp/ui-audit/audit.mjs
+
+      - name: Upload v0.3 audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kept-v03-responsive-audit
+          path: ui-audit/v03
+          if-no-files-found: error
