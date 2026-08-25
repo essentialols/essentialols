@@ -37,8 +37,8 @@ html.kept-community-compact .main-section .padding { padding-left: 12px !importa
 
 /* The official client leaves a deliberately generous visual break between
    Pinned and Other. The earlier community port compressed it too far. */
-html.kept-community-compact app-notes .main-container { margin-top: 64px !important; }
-html.kept-community-compact app-notes .pb-80 { padding-bottom: 80px !important; }
+html.kept-community-compact app-notes .main-container { margin-top: 84px !important; }
+html.kept-community-compact app-notes .pb-80 { padding-bottom: 92px !important; }
 
 /* Tiny phones are the one intentional deviation from the supplied reference:
    one column avoids the masonry overlap/cramping seen below 340 CSS px. */
