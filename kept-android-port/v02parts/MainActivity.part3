@@ -1,0 +1,190 @@
+            public void onDownloadStart(String url, String userAgent,
+                                        String contentDisposition, String mimetype,
+                                        long contentLength) {
+                enqueueDownload(url, userAgent, contentDisposition, mimetype);
+            }
+        });
+    }
+
+    private boolean handleNavigation(Uri uri) {
+        if (uri == null) return false;
+        String scheme = uri.getScheme();
+        if (scheme == null) return false;
+        scheme = scheme.toLowerCase(Locale.US);
+
+        if (scheme.equals("http") || scheme.equals("https")) {
+            Uri base = Uri.parse(serverUrl);
+            if (sameAuthority(base, uri)) return false;
+            openExternal(uri);
+            return true;
+        }
+        if (scheme.equals("blob") || scheme.equals("data") || scheme.equals("about")) return false;
+        openExternal(uri);
+        return true;
+    }
+
+    private boolean sameAuthority(Uri a, Uri b) {
+        if (a == null || b == null) return false;
+        String ah = a.getHost();
+        String bh = b.getHost();
+        if (ah == null || bh == null || !ah.equalsIgnoreCase(bh)) return false;
+        return effectivePort(a) == effectivePort(b);
+    }
+
+    private int effectivePort(Uri uri) {
+        if (uri.getPort() >= 0) return uri.getPort();
+        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
+    }
+
+    private void openExternal(Uri uri) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, uri));
+        } catch (Exception e) {
+            Toast.makeText(this, "No app can open this link.", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void enqueueDownload(String url, String userAgent,
+                                 String contentDisposition, String mimetype) {
+        try {
+            String filename = URLUtil.guessFileName(url, contentDisposition, mimetype);
+            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+            request.setTitle(filename);
+            request.setDescription("Downloading from Kept");
+            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename);
+            if (mimetype != null) request.setMimeType(mimetype);
+            if (userAgent != null) request.addRequestHeader("User-Agent", userAgent);
+            String cookie = CookieManager.getInstance().getCookie(url);
+            if (cookie != null) request.addRequestHeader("Cookie", cookie);
+            DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+            manager.enqueue(request);
+            Toast.makeText(this, "Downloading " + filename, Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            openExternal(Uri.parse(url));
+        }
+    }
+
+    private void showMenu(final View anchor) {
+        PopupMenu popup = new PopupMenu(this, anchor);
+        popup.getMenu().add("Open in browser");
+        popup.getMenu().add("Copy page URL");
+        popup.getMenu().add("Clear WebView cache");
+        popup.getMenu().add("Sync reminders now");
+        popup.getMenu().add("Change server");
+        popup.getMenu().add("About");
+        popup.setOnMenuItemClickListener(item -> {
+            String title = item.getTitle().toString();
+            if (title.equals("Open in browser")) {
+                String current = webView == null ? serverUrl : webView.getUrl();
+                if (current != null) openExternal(Uri.parse(current));
+            } else if (title.equals("Copy page URL")) {
+                String current = webView == null ? serverUrl : webView.getUrl();
+                ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                cm.setPrimaryClip(ClipData.newPlainText("Kept URL", current == null ? serverUrl : current));
+                Toast.makeText(this, "URL copied", Toast.LENGTH_SHORT).show();
+            } else if (title.equals("Clear WebView cache")) {
+                if (webView != null) webView.clearCache(true);
+                Toast.makeText(this, "Cache cleared", Toast.LENGTH_SHORT).show();
+            } else if (title.equals("Sync reminders now")) {
+                triggerReminderSync();
+            } else if (title.equals("Change server")) {
+                confirmChangeServer();
+            } else if (title.equals("About")) {
+                showAbout();
+            }
+            return true;
+        });
+        popup.show();
+    }
+
+    private void confirmChangeServer() {
+        new AlertDialog.Builder(this)
+                .setTitle("Change Kept server?")
+                .setMessage("Your Kept data stays on the server. This only changes which instance the app opens.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Change", (dialog, which) -> showSetup(null))
+                .show();
+    }
+
+    private void showAbout() {
+        new AlertDialog.Builder(this)
+                .setTitle("Kept Community 0.2")
+                .setMessage("Community Android port based on the public ericerkz/kept web app. " +
+                        "It is not the unpublished official Kept Android client.\n\n" +
+                        "v0.2 adds Android share/process-text capture and native time reminder notifications synced from Kept. " +
+                        "Background geofencing and native Smart Capture are still separate future slices.")
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
+    private boolean hasLocationPermission() {
+        if (Build.VERSION.SDK_INT < 23) return true;
+        return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+               checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_LOCATION && geolocationCallback != null) {
+            geolocationCallback.invoke(geolocationOrigin, hasLocationPermission(), false);
+            clearGeolocationRequest();
+        } else if (requestCode == REQUEST_NOTIFICATIONS) {
+            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "Notifications are off. Kept reminders will not appear until enabled in Android settings.", Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private void clearGeolocationRequest() {
+        geolocationCallback = null;
+        geolocationOrigin = null;
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_FILES || fileCallback == null) return;
+
+        Uri[] result = null;
+        if (resultCode == RESULT_OK && data != null) {
+            ClipData clip = data.getClipData();
+            if (clip != null && clip.getItemCount() > 0) {
+                result = new Uri[clip.getItemCount()];
+                for (int i = 0; i < clip.getItemCount(); i++) {
+                    result[i] = clip.getItemAt(i).getUri();
+                }
+            } else if (data.getData() != null) {
+                result = new Uri[] { data.getData() };
+            }
+        }
+        fileCallback.onReceiveValue(result);
+        fileCallback = null;
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        if (webView != null) webView.saveState(outState);
+        super.onSaveInstanceState(outState);
+    }
+
+    @Override
+    protected void onPause() {
+        if (webView != null) webView.onPause();
+        if (Build.VERSION.SDK_INT >= 21) CookieManager.getInstance().flush();
+        super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (webView != null) {
+            webView.onResume();
+            triggerReminderSync();
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
