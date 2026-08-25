@@ -10,6 +10,17 @@ if [[ ! -d "$ANDROID_HOME" ]]; then
   exit 2
 fi
 
+# The temporary build branch stores MainActivity in transport-sized chunks.
+# Reassemble it byte-for-byte before compilation. The downloadable source ZIP
+# contains the normal single MainActivity.java file.
+if [[ -d "$ROOT/v02parts" ]]; then
+  cat "$ROOT/v02parts/MainActivity.part1" \
+      "$ROOT/v02parts/MainActivity.part2" \
+      "$ROOT/v02parts/MainActivity.part3" \
+      "$ROOT/v02parts/MainActivity.part4" \
+      > "$ROOT/src/main/java/com/essentialols/keptandroid/MainActivity.java"
+fi
+
 BT_DIR="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)"
 PLATFORM_DIR="$(find "$ANDROID_HOME/platforms" -mindepth 1 -maxdepth 1 -type d -name 'android-*' | sort -V | tail -n1)"
 
@@ -39,12 +50,15 @@ mapfile -t FLATS < <(find "$BUILD/res" -type f -name '*.flat' | sort)
   --manifest "$ROOT/AndroidManifest.xml" \
   --min-sdk-version 24 \
   --target-sdk-version 35 \
+  --version-code 2 \
+  --version-name 0.2 \
   "${FLATS[@]}"
 
+mapfile -t JAVA_SOURCES < <(find "$ROOT/src/main/java" -name '*.java' -type f | sort)
 javac --release 8 \
   -classpath "$ANDROID_JAR" \
   -d "$BUILD/classes" \
-  "$(find "$ROOT/src/main/java" -name '*.java' -print -quit)"
+  "${JAVA_SOURCES[@]}"
 
 jar cf "$BUILD/classes.jar" -C "$BUILD/classes" .
 "$D8" \
@@ -71,7 +85,7 @@ keytool -genkeypair \
   -keyalg RSA -keysize 2048 -validity 10000 \
   >/dev/null 2>&1
 
-APK="$BUILD/kept-android-community-v0.1.apk"
+APK="$BUILD/kept-android-community-v0.2.apk"
 "$APKSIGNER" sign \
   --ks "$KEYSTORE" \
   --ks-pass pass:android \
