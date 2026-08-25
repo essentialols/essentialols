@@ -40,8 +40,8 @@ mapfile -t FLATS < <(find "$BUILD/res" -type f -name '*.flat' | sort)
   --min-sdk-version 24 \
   --target-sdk-version 35 \
   -A "$ROOT/src/main/assets" \
-  --version-code 3 \
-  --version-name 0.3 \
+  --version-code 4 \
+  --version-name 0.4 \
   "${FLATS[@]}"
 
 mapfile -t JAVA_SOURCES < <(find "$ROOT/src/main/java" -name '*.java' -type f | sort)
@@ -70,7 +70,7 @@ cp "$BUILD/resources.apk" "$BUILD/unsigned.apk"
 KEYSTORE="$BUILD/kept-community.keystore"
 base64 -d "$ROOT/signing/kept-community.keystore.b64" > "$KEYSTORE"
 
-APK="$BUILD/kept-android-community-v0.3.apk"
+APK="$BUILD/kept-android-community-v0.4.apk"
 "$APKSIGNER" sign \
   --ks "$KEYSTORE" \
   --ks-key-alias keptcommunity \

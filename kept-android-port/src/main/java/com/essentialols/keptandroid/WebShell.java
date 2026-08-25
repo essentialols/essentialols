@@ -40,7 +40,7 @@ final class WebShell {
         WebSettings s=view.getSettings();
         s.setJavaScriptEnabled(true); s.setDomStorageEnabled(true); s.setDatabaseEnabled(true); s.setAllowFileAccess(true); s.setAllowContentAccess(true);
         s.setLoadsImagesAutomatically(true); s.setMediaPlaybackRequiresUserGesture(false); s.setSupportZoom(true); s.setBuiltInZoomControls(false); s.setDisplayZoomControls(false);
-        s.setCacheMode(WebSettings.LOAD_DEFAULT); s.setUserAgentString(s.getUserAgentString()+" KeptAndroidCommunity/0.3");
+        s.setCacheMode(WebSettings.LOAD_DEFAULT); s.setUserAgentString(s.getUserAgentString()+" KeptAndroidCommunity/0.4");
         if(Build.VERSION.SDK_INT>=21)s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         if(Build.VERSION.SDK_INT>=26)s.setSafeBrowsingEnabled(true);
         CookieManager cm=CookieManager.getInstance(); cm.setAcceptCookie(true); if(Build.VERSION.SDK_INT>=21)cm.setAcceptThirdPartyCookies(view,true);

@@ -28,15 +28,29 @@ final class AndroidUiIntegration {
 
     static void systemBars(Activity activity, boolean light) {
         int color = light ? Color.WHITE : Color.rgb(32, 33, 36);
+        setBars(activity, color, light, light);
+    }
+
+    static void noteBars(Activity activity, String cssColor) {
+        int color;
+        try { color = Color.parseColor(cssColor); }
+        catch (Exception ignored) { color = Color.rgb(32, 33, 36); }
+        // The official Kept Android editor uses white status icons over the
+        // note color, while the bottom gesture/navigation glyph remains dark
+        // on the light Keep-style palette.
+        setBars(activity, color, false, true);
+    }
+
+    private static void setBars(Activity activity, int color, boolean darkStatusIcons, boolean darkNavIcons) {
         activity.getWindow().setStatusBarColor(color);
         activity.getWindow().setNavigationBarColor(color);
         if (Build.VERSION.SDK_INT >= 23) {
             View decor = activity.getWindow().getDecorView();
             int flags = decor.getSystemUiVisibility();
-            if (light) flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            if (darkStatusIcons) flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
             else flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
             if (Build.VERSION.SDK_INT >= 26) {
-                if (light) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                if (darkNavIcons) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
                 else flags &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
             }
             decor.setSystemUiVisibility(flags);

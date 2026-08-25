@@ -1,6 +1,7 @@
 package com.essentialols.keptandroid;
 
 import android.webkit.JavascriptInterface;
+import android.widget.Toast;
 
 import org.json.JSONArray;
 
@@ -21,6 +22,17 @@ final class NativeBridge {
 
     @JavascriptInterface public void openMenu() {
         activity.runOnUiThread(activity::showNativeMenu);
+    }
+
+
+    @JavascriptInterface public void setNoteChrome(String color) {
+        activity.runOnUiThread(() -> AndroidUiIntegration.noteBars(activity, color));
+    }
+
+    @JavascriptInterface public void smartCaptureUnavailable() {
+        activity.runOnUiThread(() -> Toast.makeText(activity,
+                "Smart Capture is not ported yet. The control is shown to match the official Kept Android layout.",
+                Toast.LENGTH_SHORT).show());
     }
 
     @JavascriptInterface public void setTheme(String theme) {

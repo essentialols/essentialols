@@ -3,8 +3,38 @@
   if (!root) return;
   root.classList.add('kept-community-android');
 
-  function syncTheme() {
+  function visible(el) {
+    if (!el) return false;
+    var r = el.getBoundingClientRect();
+    var s = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+  }
+
+  function rgbToHex(value) {
+    var m = String(value || '').match(/rgba?\(\s*(\d+)\D+(\d+)\D+(\d+)/i);
+    if (!m) return null;
+    return '#' + [m[1], m[2], m[3]].map(function (x) {
+      return Math.max(0, Math.min(255, Number(x))).toString(16).padStart(2, '0');
+    }).join('');
+  }
+
+  function activeEditor() {
+    var candidates = Array.prototype.slice.call(document.querySelectorAll(
+      'app-input .mobile-compose-mode .note-main, app-input .drawing-fullscreen, app-notes .modal-container app-input .note-main'
+    ));
+    return candidates.find(visible) || null;
+  }
+
+  function syncChrome() {
     try {
+      var editor = root.classList.contains('kept-community-compact') ? activeEditor() : null;
+      if (editor) {
+        root.classList.add('kept-community-editor-active');
+        var color = rgbToHex(getComputedStyle(editor).backgroundColor);
+        if (window.KeptNative && color) KeptNative.setNoteChrome(color);
+        return;
+      }
+      root.classList.remove('kept-community-editor-active');
       var light = !!(document.body && document.body.classList.contains('light-theme'));
       if (window.KeptNative) KeptNative.setTheme(light ? 'light' : 'dark');
     } catch (_) {}
@@ -24,6 +54,26 @@
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
     });
     bottom.appendChild(item);
+  }
+
+  function ensureSmartFab(compact) {
+    var own = document.querySelector('.kept-community-smart-fab');
+    var upstream = Array.prototype.slice.call(document.querySelectorAll('.smart-capture-fab')).find(visible);
+    if (!compact || upstream) {
+      if (own) own.remove();
+      return;
+    }
+    if (own) return;
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'kept-community-smart-fab';
+    button.setAttribute('aria-label', 'Smart Capture');
+    button.title = 'Smart Capture';
+    button.innerHTML = '<span class="material-symbols-outlined">mic</span>';
+    button.addEventListener('click', function () {
+      if (window.KeptNative) KeptNative.smartCaptureUnavailable();
+    });
+    document.body.appendChild(button);
   }
 
   function sidebarBackdrop(compact) {
@@ -75,9 +125,10 @@
     }
 
     ensureMenu();
+    ensureSmartFab(compact);
     observeSidebar();
     sidebarBackdrop(compact);
-    syncTheme();
+    syncChrome();
 
     if (previous !== undefined && previous !== compact) {
       setTimeout(function () { window.dispatchEvent(new Event('resize')); }, 40);
@@ -92,10 +143,11 @@
       if (pending) return;
       pending = requestAnimationFrame(function () { pending = 0; apply(); });
     };
-    new MutationObserver(schedule).observe(document.documentElement, { subtree: true, childList: true });
+    new MutationObserver(schedule).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'] });
     window.addEventListener('resize', schedule);
+    window.addEventListener('focus', schedule);
     if (document.body) {
-      new MutationObserver(syncTheme).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+      new MutationObserver(syncChrome).observe(document.body, { attributes: true, attributeFilter: ['class'] });
     }
   }
 
