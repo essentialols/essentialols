@@ -22,8 +22,8 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: kept-android-community-apk-v0.2
+          name: kept-android-community-apk-v0.3
           path: |
-            kept-android-port/build/kept-android-community-v0.2.apk
+            kept-android-port/build/kept-android-community-v0.3.apk
             kept-android-port/build/SHA256SUMS.txt
           if-no-files-found: error

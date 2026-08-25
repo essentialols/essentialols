@@ -9,7 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 
-public class ReminderReceiver extends BroadcastReceiver {
+public class KeptReminderReceiver extends BroadcastReceiver {
     static final String CHANNEL_ID = "kept_reminders";
 
     @Override
@@ -27,7 +27,7 @@ public class ReminderReceiver extends BroadcastReceiver {
         if (nm == null) return;
         ensureChannel(nm);
 
-        Intent open = new Intent(context, MainActivity.class);
+        Intent open = new Intent(context, KeptActivity.class);
         open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         open.putExtra("open_from_reminder", true);
         open.putExtra("reminder_id", reminderId);
@@ -55,7 +55,7 @@ public class ReminderReceiver extends BroadcastReceiver {
                 .setDefaults(Notification.DEFAULT_ALL);
 
         nm.notify(((signature == null ? reminderId : signature).hashCode() & 0x7fffffff), builder.build());
-        ReminderScheduler.markFired(context, signature);
+        KeptReminderScheduler.markFired(context, signature);
     }
 
     static void ensureChannel(NotificationManager nm) {

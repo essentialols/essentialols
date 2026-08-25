@@ -10,17 +10,6 @@ if [[ ! -d "$ANDROID_HOME" ]]; then
   exit 2
 fi
 
-# The temporary build branch stores MainActivity in transport-sized chunks.
-# Reassemble it byte-for-byte before compilation. The downloadable source ZIP
-# contains the normal single MainActivity.java file.
-if [[ -d "$ROOT/v02parts" ]]; then
-  cat "$ROOT/v02parts/MainActivity.part1" \
-      "$ROOT/v02parts/MainActivity.part2" \
-      "$ROOT/v02parts/MainActivity.part3" \
-      "$ROOT/v02parts/MainActivity.part4" \
-      > "$ROOT/src/main/java/com/essentialols/keptandroid/MainActivity.java"
-fi
-
 BT_DIR="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)"
 PLATFORM_DIR="$(find "$ANDROID_HOME/platforms" -mindepth 1 -maxdepth 1 -type d -name 'android-*' | sort -V | tail -n1)"
 
@@ -50,8 +39,9 @@ mapfile -t FLATS < <(find "$BUILD/res" -type f -name '*.flat' | sort)
   --manifest "$ROOT/AndroidManifest.xml" \
   --min-sdk-version 24 \
   --target-sdk-version 35 \
-  --version-code 2 \
-  --version-name 0.2 \
+  -A "$ROOT/src/main/assets" \
+  --version-code 3 \
+  --version-name 0.3 \
   "${FLATS[@]}"
 
 mapfile -t JAVA_SOURCES < <(find "$ROOT/src/main/java" -name '*.java' -type f | sort)
@@ -75,12 +65,12 @@ cp "$BUILD/resources.apk" "$BUILD/unsigned.apk"
 
 "$ZIPALIGN" -f -p 4 "$BUILD/unsigned.apk" "$BUILD/aligned.apk"
 
-# Community development signing identity. The Base64-encoded keystore is kept
-# with the source so v0.2+ APKs share one signer and can update in place.
+# Public community development identity shared by v0.2+ so local builds can
+# update in place. This is intentionally NOT a secret/production signing key.
 KEYSTORE="$BUILD/kept-community.keystore"
 base64 -d "$ROOT/signing/kept-community.keystore.b64" > "$KEYSTORE"
 
-APK="$BUILD/kept-android-community-v0.2.apk"
+APK="$BUILD/kept-android-community-v0.3.apk"
 "$APKSIGNER" sign \
   --ks "$KEYSTORE" \
   --ks-key-alias keptcommunity \

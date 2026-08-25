@@ -17,14 +17,14 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.TimeZone;
 
-final class ReminderScheduler {
+final class KeptReminderScheduler {
     static final String PREFS = "kept_native_reminders";
     static final String KEY_REMINDERS_JSON = "reminders_json";
     static final String KEY_SERVER_URL = "server_url";
     static final String KEY_SCHEDULED = "scheduled_signatures";
     static final String KEY_FIRED = "fired_signatures";
 
-    private ReminderScheduler() {}
+    private KeptReminderScheduler() {}
 
     static int sync(Context context, String serverUrl, JSONArray reminders) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -44,7 +44,7 @@ final class ReminderScheduler {
             if (reminder == null) continue;
             if (!"pending".equals(reminder.optString("status", "pending"))) continue;
             String dueAt = clean(reminder.optString("dueAtUtc", ""));
-            if (dueAt.isEmpty()) continue;
+            if (dueAt.isEmpty()) continue; // Location reminders are handled by a later native slice.
             long dueMs = parseIsoMillis(dueAt);
             if (dueMs <= 0) continue;
 
@@ -53,6 +53,9 @@ final class ReminderScheduler {
             if (id.isEmpty()) continue;
             String signature = id + "|" + dueAt;
             if (fired.contains(signature)) continue;
+
+            // If the server still says pending after the instant passed, allow a short grace
+            // window so a reboot or doze delay does not silently lose the reminder.
             if (dueMs < now - 6L * 60L * 60L * 1000L) continue;
             long triggerAt = Math.max(dueMs, now + 1500L);
             scheduleOne(context, serverUrl, reminder, signature, triggerAt);
@@ -83,6 +86,7 @@ final class ReminderScheduler {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         Set<String> fired = new HashSet<>(prefs.getStringSet(KEY_FIRED, new HashSet<String>()));
         fired.add(signature);
+        // Keep this bounded; old signatures are harmless but should not grow forever.
         if (fired.size() > 200) {
             fired = new HashSet<>();
             fired.add(signature);
@@ -97,7 +101,7 @@ final class ReminderScheduler {
         AlarmManager manager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (manager == null) return;
 
-        Intent intent = new Intent(context, ReminderReceiver.class);
+        Intent intent = new Intent(context, KeptReminderReceiver.class);
         intent.setAction("com.essentialols.keptandroid.REMINDER");
         intent.putExtra("signature", signature);
         intent.putExtra("reminder_id", clean(reminder.optString("id", "")));
@@ -128,7 +132,7 @@ final class ReminderScheduler {
     private static void cancel(Context context, String signature) {
         AlarmManager manager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (manager == null) return;
-        Intent intent = new Intent(context, ReminderReceiver.class);
+        Intent intent = new Intent(context, KeptReminderReceiver.class);
         intent.setAction("com.essentialols.keptandroid.REMINDER");
         PendingIntent pi = PendingIntent.getBroadcast(
                 context,
