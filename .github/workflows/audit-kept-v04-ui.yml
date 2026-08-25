@@ -98,15 +98,21 @@ jobs:
           if(!theme || theme.w < 44 || theme.h < 44 || theme.display==='none') failures.push(`theme toggle ${JSON.stringify(theme)}`);
           if(!compose || !smart || smart.y >= compose.y) failures.push(`stacked FABs smart=${JSON.stringify(smart)} compose=${JSON.stringify(compose)}`);
 
-          const gap=await page.evaluate(()=>{
-            const pinned=document.querySelector('app-notes .pb-80');
-            if(!pinned)return null;
-            const p=pinned.getBoundingClientRect();
+          const sectionGeometry=await page.evaluate(()=>{
             const titles=[...document.querySelectorAll('app-notes p[_title]')];
+            const pinnedTitle=titles.find(x=>(x.textContent||'').trim().toLowerCase()==='pinned');
             const other=titles.find(x=>(x.textContent||'').trim().toLowerCase()==='other');
-            return other?other.getBoundingClientRect().top-p.bottom:null;
+            const pinnedCards=[...document.querySelectorAll('app-notes .pb-80 [data-note-id]')];
+            const bottoms=pinnedCards.map(x=>x.getBoundingClientRect().bottom);
+            return {
+              pinnedTitleTop:pinnedTitle?pinnedTitle.getBoundingClientRect().top:null,
+              otherTop:other?other.getBoundingClientRect().top:null,
+              pinnedCardBottom:bottoms.length?Math.max(...bottoms):null
+            };
           });
-          if(gap!==null && gap < 55) failures.push(`Pinned→Other visual separation ${gap}px`);
+          const gap=(sectionGeometry.otherTop!==null&&sectionGeometry.pinnedCardBottom!==null)?sectionGeometry.otherTop-sectionGeometry.pinnedCardBottom:null;
+          if(sectionGeometry.pinnedTitleTop!==null && sectionGeometry.pinnedTitleTop < header.y+header.h+4) failures.push(`PINNED label overlaps header: ${JSON.stringify(sectionGeometry)}`);
+          if(gap!==null && gap < 60) failures.push(`Pinned→Other visual separation ${gap}px`);
           await page.screenshot({path:'ui-audit/v04/overview-light.png',fullPage:false});
 
           await page.locator('app-navbar .theme-toggle').click();
@@ -125,7 +131,7 @@ jobs:
           if(!title || parseFloat(title.font)<16) failures.push(`editor title ${JSON.stringify(title)}`);
           await page.screenshot({path:'ui-audit/v04/editor.png',fullPage:false});
 
-          fs.writeFileSync('ui-audit/v04/metrics.json', JSON.stringify({header,theme,compose,smart,gap,editor,topbar,bottombar,title,failures},null,2));
+          fs.writeFileSync('ui-audit/v04/metrics.json', JSON.stringify({header,theme,compose,smart,sectionGeometry,gap,editor,topbar,bottombar,title,failures},null,2));
           if(failures.length){console.error(failures);process.exit(1)}
           await browser.close();
           EOF
