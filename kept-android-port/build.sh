@@ -75,21 +75,17 @@ cp "$BUILD/resources.apk" "$BUILD/unsigned.apk"
 
 "$ZIPALIGN" -f -p 4 "$BUILD/unsigned.apk" "$BUILD/aligned.apk"
 
-KEYSTORE="$BUILD/debug.keystore"
-keytool -genkeypair \
-  -keystore "$KEYSTORE" \
-  -storepass android \
-  -alias androiddebugkey \
-  -keypass android \
-  -dname "CN=Kept Community Debug,O=Community,C=US" \
-  -keyalg RSA -keysize 2048 -validity 10000 \
-  >/dev/null 2>&1
+# Community development signing identity. The Base64-encoded keystore is kept
+# with the source so v0.2+ APKs share one signer and can update in place.
+KEYSTORE="$BUILD/kept-community.keystore"
+base64 -d "$ROOT/signing/kept-community.keystore.b64" > "$KEYSTORE"
 
 APK="$BUILD/kept-android-community-v0.2.apk"
 "$APKSIGNER" sign \
   --ks "$KEYSTORE" \
-  --ks-pass pass:android \
-  --key-pass pass:android \
+  --ks-key-alias keptcommunity \
+  --ks-pass pass:keptcommunity \
+  --key-pass pass:keptcommunity \
   --out "$APK" \
   "$BUILD/aligned.apk"
 
