@@ -1,0 +1,140 @@
+name: Audit Kept v0.4 official-style UI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  visual-regression:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out v0.4
+        uses: actions/checkout@v4
+
+      - name: Check out upstream Kept
+        uses: actions/checkout@v4
+        with:
+          repository: ericerkz/kept
+          ref: f7ce7a49b0c567695f09051f8f8424fa58a7d480
+          path: upstream
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build and seed upstream Kept
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd upstream
+          npm ci
+          npm run build
+          PORT=6767 node server/server.js > /tmp/kept-server.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:6767/api/setup/status >/dev/null && break
+            sleep 1
+          done
+          curl -fsS -X POST http://127.0.0.1:6767/api/setup/admin \
+            -H 'Content-Type: application/json' \
+            --data '{"username":"audit","displayName":"Mobile Audit","password":"AuditPass123!"}' >/dev/null
+          curl -fsS -X POST http://127.0.0.1:6767/api/auth/login \
+            -H 'Content-Type: application/json' \
+            --data '{"username":"audit","password":"AuditPass123!"}' >/tmp/login.json
+          TOKEN=$(jq -r .token /tmp/login.json)
+          curl -fsS -X POST http://127.0.0.1:6767/api/users/me/mark-demo-notes-created \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data '{}' >/dev/null
+          create_note() {
+            curl -fsS -X POST http://127.0.0.1:6767/api/notes \
+              -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+              --data "$1" >/dev/null
+          }
+          create_note '{"noteTitle":"Saved Links 🔗","noteBody":"You can save links in Kept and they will automatically generate a full preview for you.","bgColor":"#ccff90","pinned":true,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"Files Welcome 📎","noteBody":"Need to keep a PDF, doc, or zip alongside your notes? Drop in any file up to 25 MB.","bgColor":"#fbbcaa","pinned":true,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"Our Icon (In-Situ Images!) ✨","noteBody":"This card shows how you can add beautiful images directly to your notes.","bgColor":"#aecbfa","pinned":false,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"Everything in its place! 🎀","noteBody":"Keep things tidy and sweet with labels.","bgColor":"#d7aefb","pinned":false,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"My Cozy Day Plan (Checklist!) ☁️","noteBody":"Look! You can make sweet little checklists to keep track of your day.","bgColor":"#fbbc04","pinned":false,"isCbox":true,"checkBoxes":[{"id":1,"done":false,"data":"Sip some Oat milk latte ☕"},{"id":2,"done":false,"data":"Watch newest season"},{"id":3,"done":true,"data":"Migrate off Google Keep"}],"labels":[],"archived":false,"trashed":false}'
+
+      - name: Install Playwright
+        shell: bash
+        run: |
+          mkdir -p /tmp/ui-audit && cd /tmp/ui-audit
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0 >/dev/null
+          npx playwright install chromium >/dev/null
+
+      - name: Render official-style v0.4 UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ui-audit/v04
+          USER_JSON=$(jq -c .user /tmp/login.json)
+          TOKEN_JSON=$(jq -r .token /tmp/login.json)
+          export AUDIT_SESSION=$(jq -nc --argjson u "$USER_JSON" --arg t "$TOKEN_JSON" '{token:$t,id:$u.id,username:$u.username,displayName:$u.displayName,role:$u.role,theme:"light",avatarDataUrl:"",avatarPreset:($u.avatarPreset // "cat"),totpEnabled:false,hasBackupCodes:false,demoNotesCreatedAt:"2026-08-25T00:00:00.000Z"}')
+          cat > /tmp/ui-audit/audit.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs';
+          import path from 'node:path';
+
+          const root = process.env.GITHUB_WORKSPACE;
+          const css = path.join(root, 'kept-android-port/src/main/assets/kept-android.css');
+          const js = path.join(root, 'kept-android-port/src/main/assets/kept-android.js');
+          const browser = await chromium.launch({headless:true});
+          const context = await browser.newContext({viewport:{width:393,height:852},deviceScaleFactor:1,isMobile:true,hasTouch:true});
+          const page = await context.newPage();
+          await page.addInitScript((s) => localStorage.setItem('gk_session', s), process.env.AUDIT_SESSION);
+          await page.goto('http://127.0.0.1:6767/', {waitUntil:'networkidle'});
+          await page.addStyleTag({path:css});
+          await page.addScriptTag({path:js});
+          await page.waitForTimeout(1600);
+
+          const failures=[];
+          const rect=async(sel)=>page.locator(sel).first().evaluate(el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return{x:r.x,y:r.y,w:r.width,h:r.height,radius:s.borderRadius,display:s.display,font:s.fontSize}}).catch(()=>null);
+          const header=await rect('app-navbar .navbar');
+          const theme=await rect('app-navbar .theme-toggle');
+          const compose=await rect('.mobile-compose-fab');
+          const smart=await rect('.kept-community-smart-fab');
+          if(!header || header.h < 54 || parseFloat(header.radius) < 10) failures.push(`header ${JSON.stringify(header)}`);
+          if(!theme || theme.w < 44 || theme.h < 44 || theme.display==='none') failures.push(`theme toggle ${JSON.stringify(theme)}`);
+          if(!compose || !smart || smart.y >= compose.y) failures.push(`stacked FABs smart=${JSON.stringify(smart)} compose=${JSON.stringify(compose)}`);
+
+          const gap=await page.evaluate(()=>{
+            const pinned=document.querySelector('app-notes .pb-80');
+            if(!pinned)return null;
+            const p=pinned.getBoundingClientRect();
+            const titles=[...document.querySelectorAll('app-notes p[_title]')];
+            const other=titles.find(x=>(x.textContent||'').trim().toLowerCase()==='other');
+            return other?other.getBoundingClientRect().top-p.bottom:null;
+          });
+          if(gap!==null && gap < 55) failures.push(`Pinned→Other visual separation ${gap}px`);
+          await page.screenshot({path:'ui-audit/v04/overview-light.png',fullPage:false});
+
+          await page.locator('app-navbar .theme-toggle').click();
+          await page.waitForTimeout(400);
+          await page.screenshot({path:'ui-audit/v04/overview-dark.png',fullPage:false});
+
+          await page.locator('[data-note-id]').last().click();
+          await page.waitForTimeout(800);
+          const editor=await rect('app-input .mobile-compose-mode .note-main');
+          const topbar=await rect('app-input .mobile-compose-mode .mobile-top-bar');
+          const bottombar=await rect('app-input .mobile-compose-mode .mobile-bottom-bar');
+          const title=await rect('app-input .mobile-compose-mode .note-title');
+          if(!editor || Math.abs(editor.w-393)>2 || parseFloat(editor.radius)!==0) failures.push(`editor ${JSON.stringify(editor)}`);
+          if(!topbar || topbar.h < 60) failures.push(`editor top bar ${JSON.stringify(topbar)}`);
+          if(!bottombar || bottombar.h < 50) failures.push(`editor bottom bar ${JSON.stringify(bottombar)}`);
+          if(!title || parseFloat(title.font)<16) failures.push(`editor title ${JSON.stringify(title)}`);
+          await page.screenshot({path:'ui-audit/v04/editor.png',fullPage:false});
+
+          fs.writeFileSync('ui-audit/v04/metrics.json', JSON.stringify({header,theme,compose,smart,gap,editor,topbar,bottombar,title,failures},null,2));
+          if(failures.length){console.error(failures);process.exit(1)}
+          await browser.close();
+          EOF
+          node /tmp/ui-audit/audit.mjs
+
+      - name: Upload v0.4 audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kept-v04-official-style-audit
+          path: ui-audit/v04
+          if-no-files-found: error
