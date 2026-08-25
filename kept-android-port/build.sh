@@ -77,7 +77,6 @@ cp "$BUILD/resources.apk" "$BUILD/unsigned.apk"
 
 # Community development signing identity. The Base64-encoded keystore is kept
 # with the source so v0.2+ APKs share one signer and can update in place.
-# It is public by design and is NOT a secure production-distribution key.
 KEYSTORE="$BUILD/kept-community.keystore"
 base64 -d "$ROOT/signing/kept-community.keystore.b64" > "$KEYSTORE"
 
