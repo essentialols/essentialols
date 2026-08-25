@@ -1,0 +1,220 @@
+name: Audit Kept v0.2 UI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  web-responsive:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out test harness
+        uses: actions/checkout@v4
+
+      - name: Check out upstream Kept
+        uses: actions/checkout@v4
+        with:
+          repository: ericerkz/kept
+          ref: f7ce7a49b0c567695f09051f8f8424fa58a7d480
+          path: upstream
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build and start upstream Kept
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd upstream
+          npm ci
+          npm run build
+          PORT=6767 node server/server.js > /tmp/kept-server.log 2>&1 &
+          echo $! > /tmp/kept-server.pid
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:6767/api/setup/status >/dev/null && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:6767/api/setup/status
+
+      - name: Create audit account and representative notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST http://127.0.0.1:6767/api/setup/admin \
+            -H 'Content-Type: application/json' \
+            --data '{"username":"audit","displayName":"Mobile Audit","password":"AuditPass123!"}' >/tmp/setup.json
+          curl -fsS -X POST http://127.0.0.1:6767/api/auth/login \
+            -H 'Content-Type: application/json' \
+            --data '{"username":"audit","password":"AuditPass123!"}' >/tmp/login.json
+          TOKEN=$(jq -r .token /tmp/login.json)
+          echo "TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          curl -fsS -X POST http://127.0.0.1:6767/api/users/me/mark-demo-notes-created \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data '{}' >/dev/null
+
+          create_note() {
+            curl -fsS -X POST http://127.0.0.1:6767/api/notes \
+              -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+              --data "$1" >/dev/null
+          }
+          create_note '{"noteTitle":"Groceries for tonight","noteBody":"Oat milk, tomatoes, fresh basil, pasta, lemons, and something nice for dessert.","bgColor":"#fff475","pinned":true,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"Trip ideas ✈️","noteBody":"Kyoto in autumn<br>Monterey weekend<br>Train to Portland","bgColor":"#cbf0f8","pinned":true,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"Things to remember","noteBody":"","bgColor":"#ccff90","pinned":false,"isCbox":true,"checkBoxes":[{"id":1,"done":false,"data":"Send the document"},{"id":2,"done":false,"data":"Call the dentist"},{"id":3,"done":true,"data":"Book haircut"}],"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"A deliberately long note title to test wrapping on narrow phones","noteBody":"This card has enough text to expose cramped padding, bad line lengths, clipping, or awkward masonry behavior when the viewport gets small.","bgColor":"#f28b82","pinned":false,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"Quick thought","noteBody":"The fastest capture flow should stay visually quiet.","bgColor":"#d7aefb","pinned":false,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"Plain white card","noteBody":"Useful for checking borders, shadow contrast, and spacing without color doing the work.","bgColor":"#ffffff","pinned":false,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"Meeting notes","noteBody":"Decision: keep mobile capture simple.<br><br>Next: test compact and landscape widths.","bgColor":"#fdcfe8","pinned":false,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+          create_note '{"noteTitle":"Tiny","noteBody":"Short card.","bgColor":"#aecbfa","pinned":false,"isCbox":false,"labels":[],"archived":false,"trashed":false}'
+
+      - name: Install Playwright
+        shell: bash
+        run: |
+          mkdir -p /tmp/ui-audit
+          cd /tmp/ui-audit
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0 >/dev/null
+          npx playwright install chromium >/dev/null
+
+      - name: Capture responsive screenshots and metrics
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ui-audit/web
+          USER_JSON=$(jq -c .user /tmp/login.json)
+          TOKEN_JSON=$(jq -r .token /tmp/login.json)
+          export AUDIT_SESSION=$(jq -nc --argjson u "$USER_JSON" --arg t "$TOKEN_JSON" '{token:$t,id:$u.id,username:$u.username,displayName:$u.displayName,role:$u.role,theme:"light",avatarDataUrl:"",avatarPreset:($u.avatarPreset // "cat"),totpEnabled:false,hasBackupCodes:false,demoNotesCreatedAt:"2026-08-25T00:00:00.000Z"}')
+          cat > /tmp/ui-audit/audit.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'node:fs';
+
+          const sizes = [
+            ['tiny-320x568',320,568],
+            ['phone-360x800',360,800],
+            ['pixel-393x852',393,852],
+            ['large-phone-412x915',412,915],
+            ['compact-tablet-600x960',600,960],
+            ['tablet-768x1024',768,1024],
+            ['phone-landscape-800x360',800,360],
+          ];
+          const browser = await chromium.launch({headless:true});
+          const session = process.env.AUDIT_SESSION;
+          const out = {};
+          for (const [name,width,height] of sizes) {
+            const context = await browser.newContext({viewport:{width,height}, deviceScaleFactor:1, isMobile:true, hasTouch:true});
+            const page = await context.newPage();
+            await page.addInitScript((s) => localStorage.setItem('gk_session', s), session);
+            await page.goto('http://127.0.0.1:6767/', {waitUntil:'networkidle'});
+            await page.waitForTimeout(1800);
+            await page.screenshot({path:`ui-audit/web/${name}.png`, fullPage:false});
+            out[name] = await page.evaluate(() => {
+              const visible = (el) => {
+                const r = el.getBoundingClientRect();
+                const s = getComputedStyle(el);
+                return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+              };
+              const cards = [...document.querySelectorAll('[data-note-id]')].filter(visible).map(el => {
+                const r = el.getBoundingClientRect();
+                return {x:+r.x.toFixed(1), y:+r.y.toFixed(1), w:+r.width.toFixed(1), h:+r.height.toFixed(1)};
+              });
+              const targets = [...document.querySelectorAll('button,input,a,[role="button"],.mobile-icon,.cbox-icon')].filter(visible).map(el => {
+                const r = el.getBoundingClientRect();
+                return {tag:el.tagName, cls:el.className?.toString().slice(0,80) || '', text:(el.textContent||'').trim().slice(0,40), w:r.width, h:r.height};
+              });
+              const tooSmall = targets.filter(t => t.w < 44 || t.h < 44);
+              return {
+                innerWidth: innerWidth,
+                innerHeight: innerHeight,
+                scrollWidth: document.documentElement.scrollWidth,
+                horizontalOverflow: document.documentElement.scrollWidth > innerWidth + 1,
+                cardCount: cards.length,
+                cards,
+                visibleTouchTargets: targets.length,
+                touchTargetsUnder44: tooSmall.length,
+                smallTargetExamples: tooSmall.slice(0,12),
+                bodyClasses: document.body.className,
+                mainNativePhoneLayout: !!document.querySelector('.native-phone-layout'),
+                sidenavVisible: !![...document.querySelectorAll('app-sidenav')].find(visible),
+                fabRects: [...document.querySelectorAll('.mobile-compose-fab,.smart-capture-fab')].filter(visible).map(el => { const r=el.getBoundingClientRect(); return {cls:el.className.toString(),x:r.x,y:r.y,w:r.width,h:r.height}; })
+              };
+            });
+            await context.close();
+          }
+          fs.writeFileSync('ui-audit/web/metrics.json', JSON.stringify(out,null,2));
+          await browser.close();
+          EOF
+          cd "$GITHUB_WORKSPACE"
+          node /tmp/ui-audit/audit.mjs
+          cat ui-audit/web/metrics.json
+
+      - name: Upload responsive audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: kept-v02-web-responsive-audit
+          path: ui-audit/web
+          if-no-files-found: error
+
+  android-shell:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out test harness
+        uses: actions/checkout@v4
+
+      - name: Check out upstream Kept
+        uses: actions/checkout@v4
+        with:
+          repository: ericerkz/kept
+          ref: f7ce7a49b0c567695f09051f8f8424fa58a7d480
+          path: upstream
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build APK and upstream server
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x kept-android-port/build.sh
+          ./kept-android-port/build.sh
+          cd upstream
+          npm ci
+          npm run build
+          PORT=6767 node server/server.js > /tmp/kept-server.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:6767/api/setup/status >/dev/null && break
+            sleep 1
+          done
+          curl -fsS -X POST http://127.0.0.1:6767/api/setup/admin \
+            -H 'Content-Type: application/json' \
+            --data '{"username":"audit","displayName":"Mobile Audit","password":"AuditPass123!"}' >/dev/null
+
+      - name: Boot APK and capture actual Android shell
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            mkdir -p ui-audit/android
+            adb install -r kept-android-port/build/kept-android-community-v0.2.apk
+            adb shell am start -n com.essentialols.keptandroid/.MainActivity --es server_url http://10.0.2.2:6767
+            sleep 8
+            adb exec-out screencap -p > ui-audit/android/pixel6-portrait-login.png
+            adb shell uiautomator dump /sdcard/window.xml >/dev/null || true
+            adb pull /sdcard/window.xml ui-audit/android/pixel6-window.xml >/dev/null || true
+            adb shell settings put system accelerometer_rotation 0
+            adb shell settings put system user_rotation 1
+            sleep 3
+            adb exec-out screencap -p > ui-audit/android/pixel6-landscape-login.png
+            adb shell settings put system user_rotation 0
+
+      - name: Upload Android screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: kept-v02-android-emulator-audit
+          path: ui-audit/android
+          if-no-files-found: error
