@@ -1,8 +1,18 @@
+## Ingmar Sturm
+
+Survey methodology, data quality and research tooling. Site and consulting: [ingmarsturm.com](https://ingmarsturm.com).
+
+### Projects
+
+| Project | What it is |
+|---------|------------|
+| [irisfiles](https://github.com/essentialols/irisfiles) | Privacy-first file converter that runs entirely in the browser: no uploads, no servers. Live at [irisfiles.com](https://irisfiles.com) |
+| [fbsamplR](https://github.com/essentialols/fbsamplR) | R package that connects the Facebook Marketing API and Qualtrics for quota-based survey sampling |
+| [umlaut-helper](https://github.com/essentialols/umlaut-helper) | macOS helper that turns Caps Lock into a modifier for typing German umlauts |
+
 ### Community Dev Guides
 
-I build community-driven developer guides from real practitioner data. Each guide aggregates benchmarks, gotchas, and tested solutions from high-engagement Reddit and StackOverflow threads.
-
-**Guides:**
+I also build community-driven developer guides from real practitioner data. Each guide aggregates benchmarks, gotchas and tested solutions from high-engagement Reddit and StackOverflow threads.
 
 | Guide | Topic | Data Points |
 |-------|-------|------------|
@@ -12,6 +22,4 @@ I build community-driven developer guides from real practitioner data. Each guid
 | [DevOps to Platform Engineering](https://github.com/essentialols/devops-platform-engineering-guide) | Career transition roadmaps | 30 from 49 users |
 | [Go Modular Monolith](https://github.com/essentialols/go-modular-monolith-guide) | Architecture patterns for large Go codebases | 7 from 17 users |
 
-[**Browse all guides**](https://github.com/essentialols/community-dev-guides)
-
-These aren't generic LLM-generated content. The value comes from aggregated real-world data that you can't get by asking ChatGPT.
+[Browse all guides](https://github.com/essentialols/community-dev-guides)
